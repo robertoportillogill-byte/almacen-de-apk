@@ -1,0 +1,12 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Caja -->
+    <path android:fillColor="#FFFFFFFF" android:pathData="M32,42L54,32L76,42L76,68L54,78L32,68Z" />
+    <path android:strokeColor="#0B5CAD" android:strokeWidth="2.5" android:fillColor="#00000000"
+        android:pathData="M32,42L54,52L76,42M54,52L54,78" />
+    <!-- Marca de encontrado -->
+    <path android:fillColor="#FF2E9E5B" android:pathData="M72,60a11,11 0,1 0,0.01 0z" />
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="3" android:strokeLineCap="round"
+        android:strokeLineJoin="round" android:fillColor="#00000000"
+        android:pathData="M66.5,71.5L70.5,75.5L78,67.5" />
+</vector>

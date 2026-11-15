@@ -1,0 +1,4 @@
+<resources>
+    <style name="Theme.Mercancias" parent="android:Theme.Material.Light.NoActionBar" />
+    <color name="icono_fondo">#0B5CAD</color>
+</resources>
