@@ -18,6 +18,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -51,6 +55,7 @@ import app.presupuesto.model.Borrador
 import app.presupuesto.model.Cuenta
 import app.presupuesto.model.nombre
 import app.presupuesto.model.Repeticion
+import app.presupuesto.model.TipoCuenta
 import app.presupuesto.model.Tipo
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -138,21 +143,10 @@ fun Formulario(
             Text(
                 if (tipo == Tipo.INGRESO) "¿A qué cuenta entra?" else "¿Con qué se paga?",
                 style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(6.dp))
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.horizontalScroll(rememberScrollState())
-            ) {
-                cuentas.forEach { c ->
-                    FilterChip(
-                        selected = c.id == cuentaId,
-                        onClick = { cuentaId = c.id },
-                        label = { Text("${c.nombre} · ${c.tipo.nombre().removeSuffix("s")}") }
-                    )
-                }
-            }
+            SelectorCuentaDesplegable(cuentas, cuentaId) { cuentaId = it }
 
             Spacer(Modifier.height(14.dp))
             OutlinedTextField(
@@ -335,4 +329,63 @@ private fun Metodo(texto: String, icono: Painter, onClick: () -> Unit, modifier:
         Spacer(Modifier.height(4.dp))
         Text(texto, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
     }
+}
+
+/** Cuadro desplegable con todas las cuentas agrupadas en Caja, Bancos y Tarjetas, todo en negrita. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SelectorCuentaDesplegable(cuentas: List<Cuenta>, elegida: String?, onElegir: (String) -> Unit) {
+    var abierto by remember { mutableStateOf(false) }
+    val actual = cuentas.firstOrNull { it.id == elegida }
+
+    ExposedDropdownMenuBox(expanded = abierto, onExpandedChange = { abierto = it }) {
+        OutlinedTextField(
+            value = actual?.nombre.orEmpty(),
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            placeholder = { Text("Elige una cuenta", fontWeight = FontWeight.Bold) },
+            textStyle = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+            supportingText = actual?.let { { Text(it.tipo.plural(), fontWeight = FontWeight.Bold) } },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = abierto) },
+            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp)
+        )
+        ExposedDropdownMenu(expanded = abierto, onDismissRequest = { abierto = false }) {
+            TipoCuenta.entries.forEach { tipo ->
+                val deTipo = cuentas.filter { it.tipo == tipo }
+                if (deTipo.isNotEmpty()) {
+                    Text(
+                        tipo.plural().uppercase(),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 16.dp, top = 10.dp, bottom = 2.dp)
+                    )
+                    deTipo.forEach { c ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    c.nombre,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (c.id == elegida) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurface
+                                )
+                            },
+                            onClick = {
+                                onElegir(c.id)
+                                abierto = false
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun TipoCuenta.plural(): String = when (this) {
+    TipoCuenta.CAJA -> "Caja"
+    TipoCuenta.BANCO -> "Bancos"
+    TipoCuenta.TARJETA -> "Tarjetas"
 }
