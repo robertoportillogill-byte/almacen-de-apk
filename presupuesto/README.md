@@ -7,6 +7,7 @@ App Android para llevar los ingresos y gastos del mes, con saldo corrido.
 - **Campos por movimiento:** fecha, concepto, importe, tipo (ingreso o gasto) y saldo (calculado: lo que queda después de ese movimiento).
 - **Cuentas (pestaña «Cuentas»):** Caja, Banco y Tarjetas. Dentro de cada tipo se crean las entidades que hagan falta (p. ej. «Efectivo», «Santander», «Visa BBVA»), cada una con su saldo inicial. En una tarjeta de crédito el saldo inicial puede ser negativo (lo que se debe). Cada movimiento va a una cuenta.
 - **Resumen:** total general de hoy, subtotal de Caja, Banco y Tarjetas, saldo previsto (incluye lo programado) e ingresos y gastos del mes.
+- **Traspasos entre cuentas** (botón «Traspaso»): sacar del cajero, ingresar efectivo, pagar la tarjeta desde el banco… Sale de una cuenta y entra en otra; el total general no cambia y no cuenta como ingreso ni gasto del mes. Se editan y se borran como una sola operación.
 - **Previsión (pestaña «Previsión»):** con cuánto dinero contarás en una fecha, en total y por cuenta, y cuál es el punto más bajo hasta llegar a ella. Si en algún momento queda en negativo, lista los gastos pendientes hasta esa fecha para marcar cuáles mover a otra fecha; el botón «Sugerir qué mover» elige los menos gastos posibles que cubren lo que falta.
 - **Repetir:**
   - *Una vez*.
@@ -25,7 +26,7 @@ App Android para llevar los ingresos y gastos del mes, con saldo corrido.
 - El escaneo usa la foto de la cámara; no detecta los bordes del papel ni endereza la imagen. Conviene fotografiar el documento plano y con buena luz.
 - La voz usa el reconocedor de voz de Android (en español). Tras dictar, revisa el formulario antes de guardar.
 - Los movimientos no se sincronizan entre móviles ni se exportan todavía.
-- No hay traspasos entre cuentas (p. ej. sacar del cajero o pagar la tarjeta desde el banco). Por ahora se apuntan como un gasto en una cuenta y un ingreso en la otra.
+- Los traspasos son de una sola vez: no se pueden repetir cada mes.
 - Los datos de la versión 1.0 pasan automáticamente a una caja llamada «Efectivo», que se puede renombrar.
 
 ## Compilar

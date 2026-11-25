@@ -37,8 +37,10 @@ data class Movimiento(
     val grupo: String? = null,          // id común de todas las filas de una misma serie
     val indice: Int = 1,                // nº de cuota o de mes dentro de la serie
     val total: Int = 1,                 // nº total de cuotas o meses de la serie
-    val cuentaId: String? = null        // null solo en datos de la versión 1.0 (se migran al cargar)
+    val cuentaId: String? = null,       // null solo en datos de la versión 1.0 (se migran al cargar)
+    val traspaso: String? = null        // id común de las dos filas (sale / entra) de un traspaso entre cuentas
 ) {
+    val esTraspaso: Boolean get() = traspaso != null
     val fechaLocal: LocalDate get() = LocalDate.parse(fecha)
     val importeFirmado: Long get() = if (tipo == Tipo.INGRESO) importeCent else -importeCent
 }

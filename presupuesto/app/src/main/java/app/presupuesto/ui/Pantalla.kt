@@ -99,6 +99,7 @@ fun PantallaPrincipal(vm: PresupuestoViewModel) {
     val datos by vm.datos.collectAsStateWithLifecycle()
     val edicion by vm.edicion.collectAsStateWithLifecycle()
     val edicionCuenta by vm.edicionCuenta.collectAsStateWithLifecycle()
+    val edicionTraspaso by vm.edicionTraspaso.collectAsStateWithLifecycle()
     val mensaje by vm.mensaje.collectAsStateWithLifecycle()
     val leyendo by vm.leyendo.collectAsStateWithLifecycle()
 
@@ -170,13 +171,25 @@ fun PantallaPrincipal(vm: PresupuestoViewModel) {
         },
         floatingActionButton = {
             when (actual) {
-                Pestana.MOVIMIENTOS -> ExtendedFloatingActionButton(
-                    onClick = { vm.nuevo() },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                    text = { Text("Nuevo", fontWeight = FontWeight.SemiBold) }
-                )
+                Pestana.MOVIMIENTOS -> Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    ExtendedFloatingActionButton(
+                        onClick = { vm.nuevoTraspaso() },
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    ) {
+                        Text("⇄  Traspaso", fontWeight = FontWeight.SemiBold)
+                    }
+                    ExtendedFloatingActionButton(
+                        onClick = { vm.nuevo() },
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                        text = { Text("Nuevo", fontWeight = FontWeight.SemiBold) }
+                    )
+                }
                 Pestana.CUENTAS -> ExtendedFloatingActionButton(
                     onClick = { vm.nuevaCuenta(TipoCuenta.BANCO) },
                     containerColor = MaterialTheme.colorScheme.primary,
@@ -210,6 +223,22 @@ fun PantallaPrincipal(vm: PresupuestoViewModel) {
                 onVoz = onVoz,
                 onEscanear = onEscanear,
                 onGaleria = onGaleria
+            )
+        }
+    }
+
+    edicionTraspaso?.let { et ->
+        val estado = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { vm.cerrarTraspaso() },
+            sheetState = estado,
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            FormularioTraspaso(
+                edicion = et,
+                cuentas = datos.cuentas,
+                onGuardar = { o, d, i, f, c -> vm.guardarTraspaso(o, d, i, f, c) },
+                onEliminar = { vm.eliminarTraspaso() }
             )
         }
     }
@@ -248,6 +277,10 @@ private fun ListaMovimientos(
             .toSortedMap(compareByDescending { it })
     }
     val nombreCuenta = remember(datos) { datos.cuentas.associate { it.id to it.nombre } }
+    val origenTraspaso = remember(datos) {
+        datos.movimientos.filter { it.esTraspaso && it.tipo == Tipo.EGRESO }
+            .associate { it.traspaso!! to nombreCuenta[it.cuentaId].orEmpty() }
+    }
 
     LazyColumn(
         contentPadding = rellenoLista(relleno),
@@ -271,8 +304,15 @@ private fun ListaMovimientos(
 
         porMes.forEach { (mes, filasMes) ->
             item(key = "mes-$mes") { CabeceraMes(mes, filasMes.map { it.mov }) }
-            items(filasMes.reversed(), key = { it.mov.id }) { fila ->
-                FilaMovimiento(fila, nombreCuenta[fila.mov.cuentaId].orEmpty()) { onEditar(fila.mov) }
+            items(
+                filasMes.reversed().filterNot { it.mov.esTraspaso && it.mov.tipo == Tipo.EGRESO },
+                key = { it.mov.id }
+            ) { fila ->
+                val destino = nombreCuenta[fila.mov.cuentaId].orEmpty()
+                val detalle = if (fila.mov.esTraspaso) {
+                    "${origenTraspaso[fila.mov.traspaso].orEmpty()} → $destino"
+                } else destino
+                FilaMovimiento(fila, detalle) { onEditar(fila.mov) }
             }
         }
     }
@@ -321,8 +361,8 @@ private fun Estadistica(titulo: String, valor: String, modifier: Modifier) {
 
 @Composable
 private fun CabeceraMes(mes: YearMonth, movs: List<Movimiento>) {
-    val ingresos = movs.filter { it.tipo == Tipo.INGRESO }.sumOf { it.importeCent }
-    val egresos = movs.filter { it.tipo == Tipo.EGRESO }.sumOf { it.importeCent }
+    val ingresos = movs.filter { it.tipo == Tipo.INGRESO && !it.esTraspaso }.sumOf { it.importeCent }
+    val egresos = movs.filter { it.tipo == Tipo.EGRESO && !it.esTraspaso }.sumOf { it.importeCent }
     Row(
         Modifier
             .fillMaxWidth()
@@ -347,8 +387,13 @@ private fun CabeceraMes(mes: YearMonth, movs: List<Movimiento>) {
 private fun FilaMovimiento(fila: Fila, cuenta: String, onClick: () -> Unit) {
     val m = fila.mov
     val esIngreso = m.tipo == Tipo.INGRESO
-    val color = if (esIngreso) colorIngreso() else colorEgreso()
-    val etiqueta = when (m.repeticion) {
+    val traspaso = m.esTraspaso
+    val color = when {
+        traspaso -> MaterialTheme.colorScheme.primary
+        esIngreso -> colorIngreso()
+        else -> colorEgreso()
+    }
+    val etiqueta = if (traspaso) "Traspaso" else when (m.repeticion) {
         Repeticion.NINGUNA -> null
         Repeticion.MENSUAL -> "Mensual ${m.indice}/${m.total}"
         Repeticion.CUOTAS -> "Cuota ${m.indice}/${m.total}"
@@ -371,7 +416,7 @@ private fun FilaMovimiento(fila: Fila, cuenta: String, onClick: () -> Unit) {
                     .background(color.copy(alpha = 0.14f)),
                 contentAlignment = Alignment.Center
             ) {
-                Text(if (esIngreso) "+" else "−", color = color, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                Text(if (traspaso) "⇄" else if (esIngreso) "+" else "−", color = color, fontWeight = FontWeight.Bold, fontSize = 20.sp)
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
@@ -411,7 +456,7 @@ private fun FilaMovimiento(fila: Fila, cuenta: String, onClick: () -> Unit) {
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    (if (esIngreso) "+" else "−") + moneda(m.importeCent),
+                    (if (traspaso) "" else if (esIngreso) "+" else "−") + moneda(m.importeCent),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = color,

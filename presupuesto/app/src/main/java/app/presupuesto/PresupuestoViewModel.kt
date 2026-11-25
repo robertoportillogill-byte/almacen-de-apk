@@ -15,6 +15,7 @@ import app.presupuesto.model.Cuenta
 import app.presupuesto.model.Datos
 import app.presupuesto.model.Movimiento
 import app.presupuesto.model.Repeticion
+import app.presupuesto.model.Tipo
 import app.presupuesto.model.TipoCuenta
 import app.presupuesto.ocr.LectorDocumento
 import kotlinx.coroutines.Dispatchers
@@ -43,6 +44,17 @@ data class EdicionCuenta(
     val sesion: Int
 )
 
+/** Formulario de traspaso abierto. [traspasoId] es null cuando se crea uno nuevo. */
+data class EdicionTraspaso(
+    val traspasoId: String?,
+    val origenId: String,
+    val destinoId: String,
+    val importe: String,
+    val fecha: LocalDate,
+    val concepto: String,
+    val sesion: Int
+)
+
 class PresupuestoViewModel(app: Application) : AndroidViewModel(app) {
 
     private val almacen = Almacen(File(app.filesDir, "presupuesto.json"))
@@ -58,6 +70,9 @@ class PresupuestoViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _edicionCuenta = MutableStateFlow<EdicionCuenta?>(null)
     val edicionCuenta: StateFlow<EdicionCuenta?> = _edicionCuenta.asStateFlow()
+
+    private val _edicionTraspaso = MutableStateFlow<EdicionTraspaso?>(null)
+    val edicionTraspaso: StateFlow<EdicionTraspaso?> = _edicionTraspaso.asStateFlow()
 
     private val _mensaje = MutableStateFlow<String?>(null)
     val mensaje: StateFlow<String?> = _mensaje.asStateFlow()
@@ -85,6 +100,10 @@ class PresupuestoViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun editar(m: Movimiento) {
+        if (m.esTraspaso) {
+            editarTraspaso(m)
+            return
+        }
         val serie = if (m.grupo == null) 1 else _datos.value.movimientos.count { it.grupo == m.grupo }
         _edicion.value = Edicion(
             borrador = Borrador(
@@ -208,6 +227,60 @@ class PresupuestoViewModel(app: Application) : AndroidViewModel(app) {
                 .replaceFirstChar { c -> c.uppercase() }
         } ?: b.concepto
         return b.copy(cuentaId = elegida?.id, concepto = concepto)
+    }
+
+    // ---------- Traspasos ----------
+
+    fun nuevoTraspaso() {
+        val cuentas = _datos.value.cuentas
+        if (cuentas.size < 2) {
+            _mensaje.value = "Necesitas al menos dos cuentas para hacer un traspaso"
+            return
+        }
+        _edicionTraspaso.value = EdicionTraspaso(null, cuentas[0].id, cuentas[1].id, "", LocalDate.now(), "", ++sesion)
+    }
+
+    private fun editarTraspaso(m: Movimiento) {
+        val par = _datos.value.movimientos.filter { it.traspaso == m.traspaso }
+        val sale = par.firstOrNull { it.tipo == Tipo.EGRESO } ?: return
+        val entra = par.firstOrNull { it.tipo == Tipo.INGRESO } ?: return
+        _edicionTraspaso.value = EdicionTraspaso(
+            traspasoId = m.traspaso,
+            origenId = sale.cuentaId.orEmpty(),
+            destinoId = entra.cuentaId.orEmpty(),
+            importe = formatearImporte(m.importeCent),
+            fecha = m.fechaLocal,
+            concepto = m.concepto,
+            sesion = ++sesion
+        )
+    }
+
+    fun cerrarTraspaso() {
+        _edicionTraspaso.value = null
+    }
+
+    /** Devuelve un texto de error, o null si se ha guardado. */
+    fun guardarTraspaso(origen: String, destino: String, importe: String, fecha: LocalDate, concepto: String): String? {
+        val cent = parseImporte(importe) ?: return "Revisa el importe, por ejemplo 100,00"
+        val d = _datos.value
+        if (d.cuentas.none { it.id == origen } || d.cuentas.none { it.id == destino }) return "Elige las dos cuentas"
+        if (origen == destino) return "Elige dos cuentas distintas"
+        val editando = _edicionTraspaso.value?.traspasoId
+        val nuevos = Presupuesto.generarTraspaso(origen, destino, fecha, concepto.trim().ifEmpty { "Traspaso" }, cent)
+        _datos.value = d.copy(movimientos = d.movimientos.filterNot { editando != null && it.traspaso == editando } + nuevos)
+        _mensaje.value = "Traspaso guardado"
+        persistir()
+        _edicionTraspaso.value = null
+        return null
+    }
+
+    fun eliminarTraspaso() {
+        val id = _edicionTraspaso.value?.traspasoId ?: return
+        val d = _datos.value
+        _datos.value = d.copy(movimientos = d.movimientos.filterNot { it.traspaso == id })
+        _mensaje.value = "Traspaso eliminado"
+        persistir()
+        _edicionTraspaso.value = null
     }
 
     // ---------- Cuentas ----------

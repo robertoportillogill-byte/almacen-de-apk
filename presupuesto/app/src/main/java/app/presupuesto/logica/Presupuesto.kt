@@ -115,8 +115,8 @@ object Presupuesto {
         return Resumen(
             saldoHoy = inicial + movs.filter { !it.fechaLocal.isAfter(hoy) }.sumOf { it.importeFirmado },
             saldoPrevisto = inicial + movs.sumOf { it.importeFirmado },
-            ingresosMes = delMes.filter { it.tipo == Tipo.INGRESO }.sumOf { it.importeCent },
-            egresosMes = delMes.filter { it.tipo == Tipo.EGRESO }.sumOf { it.importeCent }
+            ingresosMes = delMes.filter { it.tipo == Tipo.INGRESO && !it.esTraspaso }.sumOf { it.importeCent },
+            egresosMes = delMes.filter { it.tipo == Tipo.EGRESO && !it.esTraspaso }.sumOf { it.importeCent }
         )
     }
 
@@ -154,11 +154,30 @@ object Presupuesto {
             }
 
         val aplazables = movs
-            .filter { it.tipo == Tipo.EGRESO && it.fechaLocal.isAfter(hoy) && !it.fechaLocal.isAfter(fecha) }
+            .filter { it.tipo == Tipo.EGRESO && !it.esTraspaso && it.fechaLocal.isAfter(hoy) && !it.fechaLocal.isAfter(fecha) }
             .sortedBy { it.fecha }
 
         return Prevision(fecha, saldo, saldosCuentas(cuentas, movs, fecha), minimo, fechaMinimo, aplazables)
     }
+
+    /**
+     * Traspaso entre dos cuentas: una fila que sale del origen y otra que entra en el destino, con el mismo
+     * importe y fecha. El total general no cambia. La fila de salida va primero, así que en el saldo corrido
+     * la de entrada (la segunda) es la que deja el total completo.
+     */
+    fun generarTraspaso(
+        origenId: String,
+        destinoId: String,
+        fecha: LocalDate,
+        concepto: String,
+        importeCent: Long,
+        id: String = UUID.randomUUID().toString()
+    ): List<Movimiento> = listOf(
+        Movimiento(UUID.randomUUID().toString(), fecha.toString(), concepto, importeCent, Tipo.EGRESO,
+            cuentaId = origenId, traspaso = id),
+        Movimiento(UUID.randomUUID().toString(), fecha.toString(), concepto, importeCent, Tipo.INGRESO,
+            cuentaId = destinoId, traspaso = id)
+    )
 
     /** Cambia la fecha de los movimientos indicados. */
     fun aplazar(movs: List<Movimiento>, ids: Set<String>, nuevaFecha: LocalDate): List<Movimiento> =

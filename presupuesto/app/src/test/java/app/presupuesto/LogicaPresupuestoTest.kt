@@ -255,4 +255,56 @@ class LogicaPresupuestoTest {
             veces = 2, cuentaId = "visa")
         assertTrue(Presupuesto.generar(b, 1000).all { it.cuentaId == "visa" })
     }
+
+    // ---------- Traspasos ----------
+
+    @Test
+    fun traspaso_mueve_dinero_sin_cambiar_el_total() {
+        val par = Presupuesto.generarTraspaso("banco", "caja", hoy, "Cajero", 20000)
+        assertEquals(2, par.size)
+        assertEquals(Tipo.EGRESO, par[0].tipo)
+        assertEquals("banco", par[0].cuentaId)
+        assertEquals(Tipo.INGRESO, par[1].tipo)
+        assertEquals("caja", par[1].cuentaId)
+        assertEquals(1, par.map { it.traspaso }.toSet().size)
+        assertTrue(par.all { it.esTraspaso })
+
+        val saldos = Presupuesto.saldosCuentas(cuentas, par, hoy).associate { it.cuenta.id to it.saldo }
+        assertEquals(10000L + 20000L, saldos["caja"])
+        assertEquals(100000L - 20000L, saldos["banco"])
+        // El total general es el mismo que sin traspaso.
+        assertEquals(Presupuesto.saldoInicial(cuentas), Presupuesto.resumen(cuentas, par, hoy).saldoHoy)
+    }
+
+    @Test
+    fun traspaso_no_cuenta_como_ingreso_ni_gasto_del_mes() {
+        val movs = Presupuesto.generarTraspaso("banco", "visa", hoy, "Pago tarjeta", 30000) +
+            Movimiento("g", "2026-11-10", "Cena", 4000, Tipo.EGRESO, cuentaId = "banco")
+        val r = Presupuesto.resumen(cuentas, movs, hoy)
+        assertEquals(0L, r.ingresosMes)
+        assertEquals(4000L, r.egresosMes)
+
+        // Pagar la tarjeta desde el banco deja la deuda de la tarjeta a cero.
+        val visaSaldo = Presupuesto.saldosCuentas(cuentas, movs, hoy).first { it.cuenta.id == "visa" }.saldo
+        assertEquals(0L, visaSaldo)
+    }
+
+    @Test
+    fun traspaso_futuro_no_se_ofrece_para_aplazar() {
+        val c = listOf(Cuenta("b", "Banco", TipoCuenta.BANCO, 10000), Cuenta("c", "Caja", TipoCuenta.CAJA, 0))
+        val movs = Presupuesto.generarTraspaso("b", "c", LocalDate.of(2026, 12, 2), "Cajero", 5000) +
+            Movimiento("g", "2026-12-03", "Luz", 3000, Tipo.EGRESO, cuentaId = "b")
+        val p = Presupuesto.prevision(c, movs, hoy, LocalDate.of(2026, 12, 31))
+        assertEquals(listOf("g"), p.gastosAplazables.map { it.id })
+        assertEquals(7000L, p.saldo)
+    }
+
+    @Test
+    fun traspaso_se_guarda_y_se_lee_con_su_enlace() {
+        val f = File.createTempFile("presupuesto", ".json")
+        val d = Datos(cuentas, Presupuesto.generarTraspaso("banco", "caja", hoy, "Cajero", 5000))
+        Almacen(f).guardar(d)
+        assertEquals(d, Almacen(f).cargar())
+        f.delete()
+    }
 }
