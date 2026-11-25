@@ -1,6 +1,7 @@
 package app.presupuesto.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -47,6 +48,8 @@ import app.presupuesto.R
 import app.presupuesto.logica.parseImporte
 import app.presupuesto.logica.formatearImporte
 import app.presupuesto.model.Borrador
+import app.presupuesto.model.Cuenta
+import app.presupuesto.model.nombre
 import app.presupuesto.model.Repeticion
 import app.presupuesto.model.Tipo
 import java.time.LocalDate
@@ -62,6 +65,7 @@ private val FormatoFecha: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM
 @Composable
 fun Formulario(
     edicion: Edicion?,
+    cuentas: List<Cuenta>,
     onGuardar: (Borrador) -> Boolean,
     onEliminar: (serie: Boolean) -> Unit,
     onVoz: () -> Unit,
@@ -80,6 +84,7 @@ fun Formulario(
         var fechaTexto by remember { mutableStateOf(inicial.fecha.format(FormatoFecha)) }
         var repeticion by remember { mutableStateOf(inicial.repeticion) }
         var veces by remember { mutableStateOf(inicial.veces.toString()) }
+        var cuentaId by remember { mutableStateOf(inicial.cuentaId ?: cuentas.firstOrNull()?.id) }
         var error by remember { mutableStateOf<String?>(null) }
 
         val fecha = runCatching { LocalDate.parse(fechaTexto.trim(), FormatoFecha) }.getOrNull()
@@ -126,6 +131,26 @@ fun Formulario(
                 }
                 TipoBoton("Gasto", tipo == Tipo.EGRESO, colorEgreso(), Modifier.weight(1f)) {
                     tipo = Tipo.EGRESO
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+            Text(
+                if (tipo == Tipo.INGRESO) "¿A qué cuenta entra?" else "¿Con qué se paga?",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(6.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.horizontalScroll(rememberScrollState())
+            ) {
+                cuentas.forEach { c ->
+                    FilterChip(
+                        selected = c.id == cuentaId,
+                        onClick = { cuentaId = c.id },
+                        label = { Text("${c.nombre} · ${c.tipo.nombre().removeSuffix("s")}") }
+                    )
                 }
             }
 
@@ -247,7 +272,8 @@ fun Formulario(
                                     concepto = concepto,
                                     importe = importe,
                                     repeticion = repeticion,
-                                    veces = numVeces ?: 1
+                                    veces = numVeces ?: 1,
+                                    cuentaId = cuentaId
                                 )
                             )
                             if (ok) null else "No se ha podido guardar"

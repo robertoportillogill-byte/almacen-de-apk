@@ -28,6 +28,23 @@ fun parseImporte(raw: String): Long? {
     return valor.movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong()
 }
 
+/**
+ * Saldo inicial de una cuenta: admite cero y negativos ("-350,00" = se deben 350 €).
+ * Vacío equivale a 0. Devuelve null si no es un número.
+ */
+fun parseSaldo(raw: String): Long? {
+    val s = raw.trim()
+    if (s.isEmpty()) return 0
+    val negativo = s.startsWith("-") || s.startsWith("−")
+    val cuerpo = s.trimStart('-', '−').trim()
+    if (cuerpo.isEmpty()) return null
+    val cent = if (cuerpo.any { it.isDigit() } && cuerpo.trim('0', ',', '.', ' ', '€').isEmpty()) 0L
+    else parseImporte(cuerpo) ?: return null
+    return if (negativo) -cent else cent
+}
+
+fun formatearSaldo(cent: Long): String = if (cent < 0) "-" + formatearImporte(-cent) else formatearImporte(cent)
+
 /** 125050 -> "1.250,50" (sin símbolo), para rellenar el formulario. */
 fun formatearImporte(cent: Long): String {
     val entero = cent / 100

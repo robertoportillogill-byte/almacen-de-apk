@@ -1,16 +1,24 @@
 package app.presupuesto
 
+import app.presupuesto.logica.Almacen
 import app.presupuesto.logica.AnalizadorTexto
 import app.presupuesto.logica.Presupuesto
 import app.presupuesto.logica.formatearImporte
+import app.presupuesto.logica.formatearSaldo
+import app.presupuesto.logica.parseSaldo
 import app.presupuesto.logica.parseImporte
 import app.presupuesto.model.Borrador
+import app.presupuesto.model.Cuenta
+import app.presupuesto.model.Datos
 import app.presupuesto.model.Movimiento
 import app.presupuesto.model.Repeticion
 import app.presupuesto.model.Tipo
+import app.presupuesto.model.TipoCuenta
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 import java.time.LocalDate
 
 class LogicaPresupuestoTest {
@@ -119,10 +127,132 @@ class LogicaPresupuestoTest {
         val filas = Presupuesto.conSaldo(movs)
         assertEquals(listOf(200000L, 195000L, 115000L), filas.map { it.saldo })
 
-        val r = Presupuesto.resumen(movs, hoy)
+        val r = Presupuesto.resumen(emptyList(), movs, hoy)
         assertEquals(195000L, r.saldoHoy)        // solo lo que ya ha ocurrido
         assertEquals(115000L, r.saldoPrevisto)   // incluye el alquiler de diciembre
         assertEquals(200000L, r.ingresosMes)
         assertEquals(5000L, r.egresosMes)
+    }
+
+    // ---------- Cuentas ----------
+
+    private val caja = Cuenta("caja", "Efectivo", TipoCuenta.CAJA, 10000)       // 100 €
+    private val banco = Cuenta("banco", "Santander", TipoCuenta.BANCO, 100000)  // 1.000 €
+    private val visa = Cuenta("visa", "Visa", TipoCuenta.TARJETA, -30000)       // debe 300 €
+    private val cuentas = listOf(caja, banco, visa)
+
+    @Test
+    fun saldos_por_cuenta_y_total_general() {
+        val movs = listOf(
+            Movimiento("1", "2026-11-02", "Nómina", 150000, Tipo.INGRESO, cuentaId = "banco"),
+            Movimiento("2", "2026-11-03", "Café", 250, Tipo.EGRESO, cuentaId = "caja"),
+            Movimiento("3", "2026-11-04", "Gasolina", 6000, Tipo.EGRESO, cuentaId = "visa"),
+            Movimiento("4", "2026-12-01", "Alquiler", 70000, Tipo.EGRESO, cuentaId = "banco")
+        )
+        val saldos = Presupuesto.saldosCuentas(cuentas, movs, hoy).associate { it.cuenta.id to it.saldo }
+        assertEquals(9750L, saldos["caja"])
+        assertEquals(250000L, saldos["banco"])   // el alquiler de diciembre aún no cuenta
+        assertEquals(-36000L, saldos["visa"])
+
+        val porTipo = Presupuesto.totalesPorTipo(Presupuesto.saldosCuentas(cuentas, movs, hoy))
+        assertEquals(9750L, porTipo[TipoCuenta.CAJA])
+        assertEquals(-36000L, porTipo[TipoCuenta.TARJETA])
+
+        val r = Presupuesto.resumen(cuentas, movs, hoy)
+        assertEquals(9750L + 250000L - 36000L, r.saldoHoy)
+        assertEquals(r.saldoHoy - 70000L, r.saldoPrevisto)
+    }
+
+    @Test
+    fun datos_antiguos_pasan_a_una_caja_efectivo() {
+        val antiguos = Datos(movimientos = listOf(Movimiento("1", "2026-11-01", "Pan", 120, Tipo.EGRESO)))
+        val d = Presupuesto.asegurarCuentas(antiguos) { "nueva" }
+        assertEquals(1, d.cuentas.size)
+        assertEquals("Efectivo", d.cuentas[0].nombre)
+        assertEquals(TipoCuenta.CAJA, d.cuentas[0].tipo)
+        assertEquals("nueva", d.movimientos[0].cuentaId)
+        // Si ya está bien, no cambia nada.
+        assertEquals(d, Presupuesto.asegurarCuentas(d) { "otra" })
+    }
+
+    @Test
+    fun almacen_lee_el_formato_de_la_version_1() {
+        val f = File.createTempFile("presupuesto", ".json")
+        f.writeText("""[{"id":"1","fecha":"2026-11-01","concepto":"Pan","importeCent":120,"tipo":"EGRESO"}]""")
+        val d = Almacen(f).cargar()
+        assertEquals(1, d.movimientos.size)
+        assertEquals("Pan", d.movimientos[0].concepto)
+
+        // Y lo que se guarda se vuelve a leer igual.
+        val conCuentas = Presupuesto.asegurarCuentas(d) { "c" }
+        Almacen(f).guardar(conCuentas)
+        assertEquals(conCuentas, Almacen(f).cargar())
+        f.delete()
+    }
+
+    @Test
+    fun saldo_inicial_admite_cero_y_negativos() {
+        assertEquals(0L, parseSaldo(""))
+        assertEquals(0L, parseSaldo("0"))
+        assertEquals(0L, parseSaldo("0,00"))
+        assertEquals(-35000L, parseSaldo("-350,00"))
+        assertEquals(125050L, parseSaldo("1.250,50"))
+        assertNull(parseSaldo("abc"))
+        assertEquals("-350,00", formatearSaldo(-35000))
+    }
+
+    @Test
+    fun voz_detecta_la_cuenta() {
+        assertEquals(TipoCuenta.TARJETA, AnalizadorTexto.analizarVoz("gasto 40 euros gasolina con tarjeta", hoy).tipoCuenta)
+        val efectivo = AnalizadorTexto.analizarVoz("gasto 3 euros pan en efectivo", hoy)
+        assertEquals(TipoCuenta.CAJA, efectivo.tipoCuenta)
+        assertEquals("Pan", efectivo.concepto)
+        assertNull(AnalizadorTexto.analizarVoz("gasto 3 euros pan", hoy).tipoCuenta)
+    }
+
+    // ---------- Previsión ----------
+
+    @Test
+    fun prevision_encuentra_el_punto_mas_bajo() {
+        // Hoy hay 800 €. El 1/12 sale el alquiler (-1.000) y el 5/12 entra la nómina (+1.500).
+        val c = listOf(Cuenta("b", "Banco", TipoCuenta.BANCO, 80000))
+        val movs = listOf(
+            Movimiento("alq", "2026-12-01", "Alquiler", 100000, Tipo.EGRESO, cuentaId = "b"),
+            Movimiento("nom", "2026-12-05", "Nómina", 150000, Tipo.INGRESO, cuentaId = "b")
+        )
+        val p = Presupuesto.prevision(c, movs, hoy, LocalDate.of(2026, 12, 31))
+        assertEquals(130000L, p.saldo)                       // al final se acaba en positivo
+        assertEquals(-20000L, p.minimo)                      // pero el 1/12 se queda en -200 €
+        assertEquals(LocalDate.of(2026, 12, 1), p.fechaMinimo)
+        assertEquals(listOf("alq"), p.gastosAplazables.map { it.id })
+    }
+
+    @Test
+    fun sugerir_mueve_los_menos_gastos_posibles() {
+        // 100 € hoy; tres gastos futuros de 30, 90 y 20 € antes del día 15. Faltan 40 €.
+        val c = listOf(Cuenta("b", "Banco", TipoCuenta.BANCO, 10000))
+        val movs = listOf(
+            Movimiento("g30", "2026-12-02", "Luz", 3000, Tipo.EGRESO, cuentaId = "b"),
+            Movimiento("g90", "2026-12-05", "Seguro", 9000, Tipo.EGRESO, cuentaId = "b"),
+            Movimiento("g20", "2026-12-10", "Teléfono", 2000, Tipo.EGRESO, cuentaId = "b")
+        )
+        val fecha = LocalDate.of(2026, 12, 15)
+        val destino = LocalDate.of(2027, 1, 1)
+        assertTrue(Presupuesto.prevision(c, movs, hoy, fecha).minimo < 0)
+
+        val sel = Presupuesto.sugerirAplazar(c, movs, hoy, fecha, destino)
+        assertEquals(setOf("g90"), sel)                      // basta con aplazar el seguro
+        val despues = Presupuesto.prevision(c, Presupuesto.aplazar(movs, sel, destino), hoy, fecha)
+        assertTrue(despues.minimo >= 0)
+
+        // Mover a una fecha que no es posterior no arregla nada: no se sugiere.
+        assertEquals(emptySet<String>(), Presupuesto.sugerirAplazar(c, movs, hoy, fecha, fecha))
+    }
+
+    @Test
+    fun generar_guarda_la_cuenta_elegida() {
+        val b = Borrador(tipo = Tipo.EGRESO, fecha = hoy, concepto = "Tele", repeticion = Repeticion.CUOTAS,
+            veces = 2, cuentaId = "visa")
+        assertTrue(Presupuesto.generar(b, 1000).all { it.cuentaId == "visa" })
     }
 }

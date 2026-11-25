@@ -3,6 +3,7 @@ package app.presupuesto.logica
 import app.presupuesto.model.Borrador
 import app.presupuesto.model.Repeticion
 import app.presupuesto.model.Tipo
+import app.presupuesto.model.TipoCuenta
 import java.time.DateTimeException
 import java.time.LocalDate
 
@@ -39,14 +40,26 @@ object AnalizadorTexto {
         RegexOption.IGNORE_CASE
     )
     private val reRuidoConcepto = Regex(
-        """\b(gastos?|ingres[oéa]r?|cobr[eéo]|pagu[eé]|pago|he\s+pagado|me\s+pagan|compra|por|hoy|ayer|anteayer|euros?|eur|el|la|los|las|de|en|para|un|una)\b|€""",
+        """\b(con\s+tarjeta|tarjeta|en\s+efectivo|efectivo|en\s+met[aá]lico|met[aá]lico|por\s+banco|banco|bizum|gastos?|ingres[oéa]r?|cobr[eéo]|pagu[eé]|pago|he\s+pagado|me\s+pagan|compra|por|hoy|ayer|anteayer|euros?|eur|el|la|los|las|de|en|para|un|una)\b|€""",
         RegexOption.IGNORE_CASE
     )
+
+    /** «con tarjeta», «en efectivo», «por banco»… -> tipo de cuenta. */
+    fun detectarTipoCuenta(texto: String): TipoCuenta? = when {
+        Regex("""tarjeta|visa|mastercard|cr[eé]dito|d[eé]bito""", RegexOption.IGNORE_CASE).containsMatchIn(texto) ->
+            TipoCuenta.TARJETA
+        Regex("""efectivo|met[aá]lico|\bcaja\b|en\s+mano""", RegexOption.IGNORE_CASE).containsMatchIn(texto) ->
+            TipoCuenta.CAJA
+        Regex("""\bbanco\b|transferencia|domiciliaci|bizum|recibo""", RegexOption.IGNORE_CASE).containsMatchIn(texto) ->
+            TipoCuenta.BANCO
+        else -> null
+    }
 
     fun analizarVoz(texto: String, hoy: LocalDate = LocalDate.now()): Borrador {
         var resto = texto.replace(Regex("\\s+"), " ").trim()
 
         val tipo = if (reTipoIngreso.containsMatchIn(resto)) Tipo.INGRESO else Tipo.EGRESO
+        val tipoCuenta = detectarTipoCuenta(resto)
 
         var repeticion = Repeticion.NINGUNA
         var veces = 12
@@ -93,7 +106,8 @@ object AnalizadorTexto {
             concepto = concepto,
             importe = importeTexto,
             repeticion = if (tipo == Tipo.INGRESO && repeticion == Repeticion.CUOTAS) Repeticion.NINGUNA else repeticion,
-            veces = veces
+            veces = veces,
+            tipoCuenta = tipoCuenta
         )
     }
 
@@ -109,7 +123,7 @@ object AnalizadorTexto {
         val importe = importeLinea ?: lineas.flatMap { importesEn(it) }.maxOrNull()
 
         val ruido = Regex(
-            """factura|ticket|albar[aá]n|n\.?\s*i\.?\s*f|cif|nif|tel|www|@|fecha|total|iva|cambio|efectivo|gracias""",
+            """factura|ticket|albar[aá]n|n\.?\s*i\.?\s*f|cif|nif|tel|www|@|fecha|total|iva|cambio|efectivo|tarjeta|visa|mastercard|gracias""",
             RegexOption.IGNORE_CASE
         )
         val concepto = lineas.firstOrNull { linea ->
@@ -124,7 +138,8 @@ object AnalizadorTexto {
             tipo = if (esIngreso) Tipo.INGRESO else Tipo.EGRESO,
             fecha = fecha,
             concepto = concepto,
-            importe = importe?.let { formatearImporte(it) }.orEmpty()
+            importe = importe?.let { formatearImporte(it) }.orEmpty(),
+            tipoCuenta = detectarTipoCuenta(texto)
         )
     }
 

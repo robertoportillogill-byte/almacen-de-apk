@@ -8,7 +8,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +23,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBox
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -32,6 +36,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -40,13 +46,16 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -60,8 +69,13 @@ import app.presupuesto.PresupuestoViewModel
 import app.presupuesto.R
 import app.presupuesto.logica.Fila
 import app.presupuesto.logica.Presupuesto
+import app.presupuesto.logica.Resumen
+import app.presupuesto.model.Datos
+import app.presupuesto.model.Movimiento
 import app.presupuesto.model.Repeticion
 import app.presupuesto.model.Tipo
+import app.presupuesto.model.TipoCuenta
+import app.presupuesto.model.nombre
 import java.io.File
 import java.time.LocalDate
 import java.time.YearMonth
@@ -72,22 +86,24 @@ private val Espanol = Locale("es", "ES")
 private val FormatoDia = DateTimeFormatter.ofPattern("d MMM", Espanol)
 private val FormatoMes = DateTimeFormatter.ofPattern("MMMM yyyy", Espanol)
 
+private enum class Pestana(val titulo: String, val icono: ImageVector) {
+    MOVIMIENTOS("Movimientos", Icons.Filled.List),
+    CUENTAS("Cuentas", Icons.Filled.AccountBox),
+    PREVISION("Previsión", Icons.Filled.DateRange)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PantallaPrincipal(vm: PresupuestoViewModel) {
     val contexto = LocalContext.current
-    val movs by vm.movs.collectAsStateWithLifecycle()
+    val datos by vm.datos.collectAsStateWithLifecycle()
     val edicion by vm.edicion.collectAsStateWithLifecycle()
+    val edicionCuenta by vm.edicionCuenta.collectAsStateWithLifecycle()
     val mensaje by vm.mensaje.collectAsStateWithLifecycle()
     val leyendo by vm.leyendo.collectAsStateWithLifecycle()
 
-    val hoy = remember { LocalDate.now() }
-    val resumen = remember(movs) { Presupuesto.resumen(movs, hoy) }
-    val porMes = remember(movs) {
-        Presupuesto.conSaldo(movs)
-            .groupBy { YearMonth.from(it.mov.fechaLocal) }
-            .toSortedMap(compareByDescending { it })
-    }
+    var pestana by rememberSaveable { mutableIntStateOf(0) }
+    val actual = Pestana.entries[pestana]
 
     val avisos = remember { SnackbarHostState() }
     LaunchedEffect(mensaje) {
@@ -114,7 +130,7 @@ fun PantallaPrincipal(vm: PresupuestoViewModel) {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-ES")
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "Di el movimiento: gasto o ingreso, importe y concepto")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Di el movimiento: gasto o ingreso, importe, concepto y con qué pagas")
         }
         try {
             lanzarVoz.launch(intent)
@@ -140,45 +156,42 @@ fun PantallaPrincipal(vm: PresupuestoViewModel) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(avisos) },
+        bottomBar = {
+            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                Pestana.entries.forEachIndexed { i, p ->
+                    NavigationBarItem(
+                        selected = i == pestana,
+                        onClick = { pestana = i },
+                        icon = { Icon(p.icono, contentDescription = null) },
+                        label = { Text(p.titulo) }
+                    )
+                }
+            }
+        },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { vm.nuevo() },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                icon = { Icon(painterResource(R.drawable.ic_mic), contentDescription = null) },
-                text = { Text("Nuevo", fontWeight = FontWeight.SemiBold) }
-            )
+            when (actual) {
+                Pestana.MOVIMIENTOS -> ExtendedFloatingActionButton(
+                    onClick = { vm.nuevo() },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                    text = { Text("Nuevo", fontWeight = FontWeight.SemiBold) }
+                )
+                Pestana.CUENTAS -> ExtendedFloatingActionButton(
+                    onClick = { vm.nuevaCuenta(TipoCuenta.BANCO) },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                    text = { Text("Nueva cuenta", fontWeight = FontWeight.SemiBold) }
+                )
+                Pestana.PREVISION -> Unit
+            }
         }
     ) { relleno ->
-        LazyColumn(
-            contentPadding = PaddingValues(
-                start = 16.dp, end = 16.dp, top = relleno.calculateTopPadding() + 12.dp,
-                bottom = relleno.calculateBottomPadding() + 96.dp
-            ),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            item { Cabecera(resumen.saldoHoy, resumen.saldoPrevisto, resumen.ingresosMes, resumen.egresosMes) }
-
-            if (leyendo) {
-                item {
-                    Column(Modifier.fillMaxWidth().padding(top = 4.dp)) {
-                        Text("Leyendo el documento…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 6.dp))
-                    }
-                }
-            }
-
-            if (movs.isEmpty()) {
-                item { Vacio() }
-            }
-
-            porMes.forEach { (mes, filasMes) ->
-                item(key = "mes-$mes") { CabeceraMes(mes, filasMes.map { it.mov }) }
-                items(filasMes.reversed(), key = { it.mov.id }) { fila ->
-                    FilaMovimiento(fila) { vm.editar(fila.mov) }
-                }
-            }
+        when (actual) {
+            Pestana.MOVIMIENTOS -> ListaMovimientos(datos, leyendo, relleno) { vm.editar(it) }
+            Pestana.CUENTAS -> PantallaCuentas(datos, relleno, onNueva = vm::nuevaCuenta, onEditar = vm::editarCuenta)
+            Pestana.PREVISION -> PantallaPrevision(datos, relleno, onMover = vm::moverGastos)
         }
     }
 
@@ -191,6 +204,7 @@ fun PantallaPrincipal(vm: PresupuestoViewModel) {
         ) {
             Formulario(
                 edicion = ed,
+                cuentas = datos.cuentas,
                 onGuardar = { vm.guardar(it) },
                 onEliminar = { serie -> vm.eliminar(serie) },
                 onVoz = onVoz,
@@ -199,12 +213,74 @@ fun PantallaPrincipal(vm: PresupuestoViewModel) {
             )
         }
     }
+
+    edicionCuenta?.let { ec ->
+        val estado = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { vm.cerrarCuenta() },
+            sheetState = estado,
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            FormularioCuenta(
+                edicion = ec,
+                onGuardar = { n, t, s -> vm.guardarCuenta(n, t, s) },
+                onEliminar = { vm.eliminarCuenta() }
+            )
+        }
+    }
 }
 
 @Composable
-private fun Cabecera(saldoHoy: Long, previsto: Long, ingresos: Long, egresos: Long) {
-    val hoy = LocalDate.now()
-    val mes = YearMonth.from(hoy).format(FormatoMes).replaceFirstChar { it.uppercase() }
+private fun ListaMovimientos(
+    datos: Datos,
+    leyendo: Boolean,
+    relleno: PaddingValues,
+    onEditar: (Movimiento) -> Unit
+) {
+    val hoy = remember { LocalDate.now() }
+    val resumen = remember(datos) { Presupuesto.resumen(datos.cuentas, datos.movimientos, hoy) }
+    val porTipo = remember(datos) {
+        Presupuesto.totalesPorTipo(Presupuesto.saldosCuentas(datos.cuentas, datos.movimientos, hoy))
+    }
+    val porMes = remember(datos) {
+        Presupuesto.conSaldo(datos.movimientos, Presupuesto.saldoInicial(datos.cuentas))
+            .groupBy { YearMonth.from(it.mov.fechaLocal) }
+            .toSortedMap(compareByDescending { it })
+    }
+    val nombreCuenta = remember(datos) { datos.cuentas.associate { it.id to it.nombre } }
+
+    LazyColumn(
+        contentPadding = rellenoLista(relleno),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        item { Cabecera(resumen, porTipo) }
+
+        if (leyendo) {
+            item {
+                Column(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                    Text("Leyendo el documento…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 6.dp))
+                }
+            }
+        }
+
+        if (datos.movimientos.isEmpty()) {
+            item { Vacio() }
+        }
+
+        porMes.forEach { (mes, filasMes) ->
+            item(key = "mes-$mes") { CabeceraMes(mes, filasMes.map { it.mov }) }
+            items(filasMes.reversed(), key = { it.mov.id }) { fila ->
+                FilaMovimiento(fila, nombreCuenta[fila.mov.cuentaId].orEmpty()) { onEditar(fila.mov) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Cabecera(r: Resumen, porTipo: Map<TipoCuenta, Long>) {
+    val mes = YearMonth.now().format(FormatoMes).replaceFirstChar { it.uppercase() }
     Column(
         Modifier
             .fillMaxWidth()
@@ -212,23 +288,20 @@ private fun Cabecera(saldoHoy: Long, previsto: Long, ingresos: Long, egresos: Lo
             .background(fondoCabecera())
             .padding(22.dp)
     ) {
-        Text("Saldo de hoy", style = MaterialTheme.typography.labelLarge, color = Color.White.copy(alpha = 0.8f))
+        Text("Total general hoy", style = MaterialTheme.typography.labelLarge, color = Color.White.copy(alpha = 0.8f))
+        Text(moneda(r.saldoHoy), fontSize = 38.sp, fontWeight = FontWeight.Bold, color = Color.White)
         Text(
-            moneda(saldoHoy),
-            fontSize = 38.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color.White
-        )
-        Text(
-            "Previsto con lo programado: ${moneda(previsto)}",
+            "Previsto con lo programado: ${moneda(r.saldoPrevisto)}",
             style = MaterialTheme.typography.bodySmall,
             color = Color.White.copy(alpha = 0.8f)
         )
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(14.dp))
+        TotalesPorTipo(porTipo)
+        Spacer(Modifier.height(14.dp))
         Text(mes, style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.8f))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 6.dp)) {
-            Estadistica("Ingresos", moneda(ingresos), Modifier.weight(1f))
-            Estadistica("Gastos", moneda(egresos), Modifier.weight(1f))
+            Estadistica("Ingresos", moneda(r.ingresosMes), Modifier.weight(1f))
+            Estadistica("Gastos", moneda(r.egresosMes), Modifier.weight(1f))
         }
     }
 }
@@ -247,7 +320,7 @@ private fun Estadistica(titulo: String, valor: String, modifier: Modifier) {
 }
 
 @Composable
-private fun CabeceraMes(mes: YearMonth, movs: List<app.presupuesto.model.Movimiento>) {
+private fun CabeceraMes(mes: YearMonth, movs: List<Movimiento>) {
     val ingresos = movs.filter { it.tipo == Tipo.INGRESO }.sumOf { it.importeCent }
     val egresos = movs.filter { it.tipo == Tipo.EGRESO }.sumOf { it.importeCent }
     Row(
@@ -271,7 +344,7 @@ private fun CabeceraMes(mes: YearMonth, movs: List<app.presupuesto.model.Movimie
 }
 
 @Composable
-private fun FilaMovimiento(fila: Fila, onClick: () -> Unit) {
+private fun FilaMovimiento(fila: Fila, cuenta: String, onClick: () -> Unit) {
     val m = fila.mov
     val esIngreso = m.tipo == Tipo.INGRESO
     val color = if (esIngreso) colorIngreso() else colorEgreso()
@@ -312,9 +385,12 @@ private fun FilaMovimiento(fila: Fila, onClick: () -> Unit) {
                 )
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
                     Text(
-                        m.fechaLocal.format(FormatoDia),
+                        listOf(m.fechaLocal.format(FormatoDia), cuenta).filter { it.isNotEmpty() }.joinToString(" · "),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
                     if (etiqueta != null) {
                         Spacer(Modifier.width(8.dp))
@@ -368,7 +444,8 @@ private fun Vacio() {
         Spacer(Modifier.height(12.dp))
         Text("Aún no hay movimientos", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Text(
-            "Pulsa «Nuevo» para escribir, dictar por voz o escanear un documento.",
+            "Primero crea tus cuentas (caja, bancos y tarjetas) en la pestaña «Cuentas». " +
+                "Después pulsa «Nuevo» para escribir, dictar por voz o escanear un documento.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
